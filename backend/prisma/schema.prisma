@@ -3,9 +3,9 @@ generator client {
 }
 
 datasource db {
-  provider  = "postgresql"
-  url       = env("DATABASE_URL")
-  directUrl = env("DIRECT_URL")
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+  //directUrl = env("DIRECT_URL")
 }
 
 model user {
@@ -13,6 +13,7 @@ model user {
   name       String
   email      String  @unique
   googleId   String  @unique
+  providor   String  @default("google")
   videoCount Int     @default(0)
   videos     video[]
 }
