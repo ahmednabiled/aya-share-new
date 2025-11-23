@@ -477,12 +477,12 @@ if __name__ == "__main__":
     try:
         # Run the full pipeline: split → transcribe → generate video
         result = process_full_pipeline(
-            audio_path="assets/quran.mp3",
+            audio_path=r"", # path
             output_video="final_video.mp4",
             output_dir="splitted_audio",
-            api_url="https://a931226e7236.ngrok-free.app/transcribe",  # Set to your API URL if you want transcription
-            bg_path="assets/bg.png",
-            font_path="assets/TheYearofTheCamel-Regular.otf"
+            api_url="https://c0c657ac6b48.ngrok-free.app/transcribe",  # Set to your API URL if you want transcription
+            bg_path=r"", # path
+            font_path=r"" # path
         )
         
         logger.info("\n" + "=" * 60)
