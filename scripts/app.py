@@ -6,6 +6,7 @@ Converts audio recitations into videos with text overlays
 # Standard library imports (organized alphabetically)
 import json
 import os
+import sys
 import logging
 from pathlib import Path
 from typing import List, Dict, Optional, Tuple
@@ -485,16 +486,35 @@ def process_full_pipeline(
 
 if __name__ == "__main__":
     """
-    Example usage when running script directly.
-    Modify these parameters as needed.
+    Usage: python app.py <audio_path>
+    Accepts audio file path as command line argument from backend.
     """
+    # Get audio path from command line argument
+    if len(sys.argv) < 2:
+        logger.error("Usage: python app.py <audio_path>")
+        print(json.dumps({"status": "failed", "error": "No audio path provided"}))
+        exit(1)
+    
+    audio_path_arg = sys.argv[1]
+    
+    # Convert to absolute path, resolving relative to backend directory
+    audio_path = Path(audio_path_arg)
+    if not audio_path.is_absolute():
+        # Relative paths from backend are relative to backend folder
+        audio_path = (SCRIPT_ROOT.parent / "backend" / audio_path_arg).resolve()
+    else:
+        audio_path = audio_path.resolve()
+    
+    audio_path = str(audio_path)
+    logger.info(f"Resolved audio path: {audio_path}")
+    
     try:
         # Run the full pipeline: split → transcribe → generate video
         result = process_full_pipeline(
-            audio_path=str(DEFAULT_AUDIO_FILE),
+            audio_path=audio_path,
             output_video=str(DEFAULT_OUTPUT_VIDEO),
             output_dir=str(UPLOAD_DIR),
-            api_url="https://fe5d98c12d9c.ngrok-free.app/transcribe",  # Set to your API URL if you want transcription
+            api_url="https://58c7bfd66721.ngrok-free.app/transcribe",
             bg_path=str(DEFAULT_BG_IMAGE),
             font_path=str(DEFAULT_FONT_FILE)
         )
@@ -504,6 +524,10 @@ if __name__ == "__main__":
         logger.info("=" * 60)
         logger.info(json.dumps(result, indent=2))
         
+        # Output JSON for backend to parse
+        print(json.dumps(result))
+        
     except Exception as e:
         logger.error(f"Script execution failed: {e}")
+        print(json.dumps({"status": "failed", "error": str(e)}))
         exit(1)    
