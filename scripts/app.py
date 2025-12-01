@@ -33,7 +33,7 @@ logger = logging.getLogger(__name__)
 
 # Cross-platform paths for generated assets and static resources
 SCRIPT_ROOT = Path(__file__).resolve().parent
-UPLOAD_DIR = SCRIPT_ROOT.parent / "backend" / "upload"
+UPLOAD_DIR = SCRIPT_ROOT.parent / "backend" / "shared"
 ASSETS_DIR = SCRIPT_ROOT / "assets"
 
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
