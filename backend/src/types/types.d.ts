@@ -1,4 +1,5 @@
 import * as express from "express";
+import { IUser } from "../interfaces/types.ts";
 
 declare global {
   namespace Express {
@@ -8,6 +9,10 @@ declare global {
         email: string
         googleId: string
         videoCount: int
+    }
+
+    interface Request {
+        User: IUser
     }
   }
 }
