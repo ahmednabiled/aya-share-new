@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef } from "react";
 import { useLocation } from "wouter";
 import { 
   Mic, 
@@ -7,89 +7,150 @@ import {
   History, 
   User, 
   Play, 
-  Pause, 
   Square, 
   ChevronLeft,
   Menu,
   Loader2,
-  FileAudio,
   Share2,
   Download,
-  Facebook,
-  Twitter,
-  Instagram,
-  Linkedin,
-  Link as LinkIcon,
-  MessageCircle
+  Trash2,
+  Video as VideoIcon
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
-import { Slider } from "@/components/ui/slider";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogDescription } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { useDropzone } from "react-dropzone";
 import { motion, AnimatePresence } from "framer-motion";
+import { useAuth } from "@/contexts/AuthContext";
+import { useVideos, useCreateVideo, useDeleteVideo } from "@/hooks/use-videos";
+import { Video } from "@/types/api";
 import bgImage from "@assets/generated_images/Subtle_islamic_geometric_pattern_background_0586174c.png";
-
-// Mock Data
-const MOCK_AYA = {
-  arabic: "بِسْمِ ٱللَّهِ ٱلرَّحْمَـٰنِ ٱلرَّحِيمِ",
-  english: "In the name of Allah, the Entirely Merciful, the Especially Merciful.",
-  surah: "Al-Fatiha",
-  aya: 1
-};
 
 export default function Dashboard() {
   const [_, setLocation] = useLocation();
   const { toast } = useToast();
-  const [viewState, setViewState] = useState<"idle" | "recording" | "uploading" | "processing" | "result">("idle");
-  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
-  const [audioFile, setAudioFile] = useState<File | null>(null);
+  const { user, logout } = useAuth();
   
-  // Mock Recording State
+  // API Hooks
+  const { data: videos = [], isLoading: isLoadingVideos } = useVideos();
+  const createVideoMutation = useCreateVideo();
+  const deleteVideoMutation = useDeleteVideo();
+  
+  const [viewState, setViewState] = useState<"idle" | "recording" | "uploading" | "processing" | "result" | "history">("idle");
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const [selectedVideo, setSelectedVideo] = useState<Video | null>(null);
+  
+  // Recording State
   const [isRecording, setIsRecording] = useState(false);
   const [recordingTime, setRecordingTime] = useState(0);
+  const [audioBlob, setAudioBlob] = useState<Blob | null>(null);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const chunksRef = useRef<Blob[]>([]);
 
   // Handlers
-  const handleLogout = () => setLocation("/");
+  const handleLogout = async () => {
+    await logout();
+    setLocation("/");
+  };
   
-  const startRecording = () => {
-    setViewState("recording");
-    setIsRecording(true);
-    setRecordingTime(0);
-    timerRef.current = setInterval(() => {
-      setRecordingTime(prev => prev + 1);
-    }, 1000);
+  const startRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mediaRecorder = new MediaRecorder(stream);
+      mediaRecorderRef.current = mediaRecorder;
+      chunksRef.current = [];
+      
+      mediaRecorder.ondataavailable = (e) => {
+        if (e.data.size > 0) {
+          chunksRef.current.push(e.data);
+        }
+      };
+      
+      mediaRecorder.onstop = () => {
+        const blob = new Blob(chunksRef.current, { type: "audio/webm" });
+        setAudioBlob(blob);
+        stream.getTracks().forEach(track => track.stop());
+      };
+      
+      mediaRecorder.start();
+      setViewState("recording");
+      setIsRecording(true);
+      setRecordingTime(0);
+      timerRef.current = setInterval(() => {
+        setRecordingTime(prev => prev + 1);
+      }, 1000);
+    } catch (error) {
+      toast({
+        title: "Microphone Error",
+        description: "Could not access microphone. Please check permissions.",
+        variant: "destructive",
+      });
+    }
   };
 
   const stopRecording = () => {
     if (timerRef.current) clearInterval(timerRef.current);
+    if (mediaRecorderRef.current) {
+      mediaRecorderRef.current.stop();
+    }
     setIsRecording(false);
     setViewState("processing");
-    // Mock processing time
+    
+    // Wait for blob to be ready, then upload
     setTimeout(() => {
-      setViewState("result");
-      toast({
-        title: "Processing Complete",
-        description: "We found the matching Aya for your recitation.",
-      });
-    }, 3000);
+      if (chunksRef.current.length > 0) {
+        const blob = new Blob(chunksRef.current, { type: "audio/webm" });
+        uploadAudio(blob);
+      }
+    }, 100);
   };
 
-  const onDrop = (acceptedFiles: File[]) => {
+  const uploadAudio = async (blob: Blob) => {
+    const file = new File([blob], `recording-${Date.now()}.webm`, { type: "audio/webm" });
+    
+    try {
+      const video = await createVideoMutation.mutateAsync(file);
+      setSelectedVideo(video);
+      setViewState("result");
+      toast({
+        title: "Video Created!",
+        description: "Your recitation video has been generated.",
+      });
+    } catch (error) {
+      toast({
+        title: "Processing Failed",
+        description: String(error),
+        variant: "destructive",
+      });
+      setViewState("idle");
+    }
+  };
+
+  const onDrop = async (acceptedFiles: File[]) => {
     if (acceptedFiles.length > 0) {
-      setAudioFile(acceptedFiles[0]);
       setViewState("processing");
-      // Mock processing
-      setTimeout(() => {
+      
+      try {
+        const video = await createVideoMutation.mutateAsync(acceptedFiles[0]);
+        setSelectedVideo(video);
         setViewState("result");
-      }, 3000);
+        toast({
+          title: "Video Created!",
+          description: "Your recitation video has been generated.",
+        });
+      } catch (error) {
+        toast({
+          title: "Processing Failed",
+          description: String(error),
+          variant: "destructive",
+        });
+        setViewState("idle");
+      }
     }
   };
 
@@ -101,15 +162,32 @@ export default function Dashboard() {
 
   const reset = () => {
     setViewState("idle");
-    setAudioFile(null);
+    setSelectedVideo(null);
     setRecordingTime(0);
+    setAudioBlob(null);
   };
 
-  const handleShare = (platform: string) => {
-    toast({
-      title: "Shared Successfully",
-      description: `Your video has been shared to ${platform}`,
-    });
+  const handleDeleteVideo = async (videoId: string) => {
+    try {
+      await deleteVideoMutation.mutateAsync(videoId);
+      toast({
+        title: "Video Deleted",
+        description: "The video has been removed.",
+      });
+      if (selectedVideo?.id === videoId) {
+        reset();
+      }
+    } catch (error) {
+      toast({
+        title: "Delete Failed",
+        description: String(error),
+        variant: "destructive",
+      });
+    }
+  };
+
+  const showHistory = () => {
+    setViewState("history");
   };
 
   return (
@@ -125,9 +203,29 @@ export default function Dashboard() {
           </Button>
         </div>
         
+        {/* User Info */}
+        {isSidebarOpen && user && (
+          <div className="px-6 py-4 border-b">
+            <p className="font-medium text-sm">{user.name}</p>
+            <p className="text-xs text-muted-foreground">{user.email}</p>
+          </div>
+        )}
+        
         <div className="flex-1 py-6 flex flex-col gap-2 px-3">
-          <NavButton icon={<User />} label="Profile" isOpen={isSidebarOpen} active={false} />
-          <NavButton icon={<History />} label="Recordings" isOpen={isSidebarOpen} active={false} />
+          <NavButton 
+            icon={<VideoIcon />} 
+            label="Create Video" 
+            isOpen={isSidebarOpen} 
+            active={viewState === "idle" || viewState === "recording" || viewState === "processing" || viewState === "result"} 
+            onClick={reset}
+          />
+          <NavButton 
+            icon={<History />} 
+            label="My Videos" 
+            isOpen={isSidebarOpen} 
+            active={viewState === "history"} 
+            onClick={showHistory}
+          />
         </div>
 
         <div className="p-4 border-t border-sidebar-border">
@@ -151,10 +249,22 @@ export default function Dashboard() {
           </SheetTrigger>
           <SheetContent side="left" className="w-72">
             <div className="mt-8 flex flex-col gap-4">
-              <Button variant="ghost" className="justify-start"><User className="mr-2 h-4 w-4"/> Profile</Button>
-              <Button variant="ghost" className="justify-start"><History className="mr-2 h-4 w-4"/> Recordings</Button>
+              {user && (
+                <div className="pb-4 border-b">
+                  <p className="font-medium">{user.name}</p>
+                  <p className="text-sm text-muted-foreground">{user.email}</p>
+                </div>
+              )}
+              <Button variant="ghost" className="justify-start" onClick={reset}>
+                <VideoIcon className="mr-2 h-4 w-4"/> Create Video
+              </Button>
+              <Button variant="ghost" className="justify-start" onClick={showHistory}>
+                <History className="mr-2 h-4 w-4"/> My Videos
+              </Button>
               <Separator />
-              <Button variant="ghost" className="justify-start text-destructive" onClick={handleLogout}><LogOut className="mr-2 h-4 w-4"/> Logout</Button>
+              <Button variant="ghost" className="justify-start text-destructive" onClick={handleLogout}>
+                <LogOut className="mr-2 h-4 w-4"/> Logout
+              </Button>
             </div>
           </SheetContent>
         </Sheet>
@@ -199,7 +309,7 @@ export default function Dashboard() {
                     icon={<Upload className="h-12 w-12 text-accent" />}
                     title="Upload Audio"
                     description="Upload an existing MP3 or WAV file"
-                    onClick={() => {}} // Handled by dropzone
+                    onClick={() => {}}
                     active={isDragActive}
                     testId="card-upload"
                   />
@@ -253,14 +363,14 @@ export default function Dashboard() {
               >
                 <Loader2 className="h-16 w-16 text-accent animate-spin" />
                 <div className="text-center space-y-2">
-                  <h3 className="text-xl font-serif">Analyzing Recitation...</h3>
-                  <p className="text-muted-foreground">Finding the matching verses in the Quran</p>
+                  <h3 className="text-xl font-serif">Creating Your Video...</h3>
+                  <p className="text-muted-foreground">This may take a few minutes</p>
                 </div>
               </motion.div>
             )}
 
             {/* STATE: RESULT */}
-            {viewState === "result" && (
+            {viewState === "result" && selectedVideo && (
               <motion.div
                 key="result"
                 initial={{ opacity: 0, y: 50 }}
@@ -272,112 +382,111 @@ export default function Dashboard() {
                     <ChevronLeft className="mr-2 h-4 w-4" /> Back
                    </Button>
                    <div className="flex gap-2">
-                     <Dialog>
-                       <DialogTrigger asChild>
-                         <Button variant="outline" className="gap-2" data-testid="btn-share">
-                           <Share2 className="h-4 w-4"/> Share
-                         </Button>
-                       </DialogTrigger>
-                       <DialogContent className="sm:max-w-md">
-                         <DialogHeader>
-                           <DialogTitle>Share Recitation</DialogTitle>
-                           <DialogDescription>
-                             Share your video to social media or copy the link.
-                           </DialogDescription>
-                         </DialogHeader>
-                         <div className="flex flex-col gap-4 py-4">
-                           <div className="grid grid-cols-4 gap-2">
-                             <ShareButton 
-                               icon={<Facebook className="h-5 w-5" />} 
-                               label="Facebook" 
-                               onClick={() => handleShare("Facebook")}
-                               className="hover:text-[#1877F2] hover:bg-[#1877F2]/10"
-                             />
-                             <ShareButton 
-                               icon={<Twitter className="h-5 w-5" />} 
-                               label="X" 
-                               onClick={() => handleShare("X")}
-                               className="hover:text-black hover:bg-black/10 dark:hover:text-white dark:hover:bg-white/10"
-                             />
-                             <ShareButton 
-                               icon={<Instagram className="h-5 w-5" />} 
-                               label="Instagram" 
-                               onClick={() => handleShare("Instagram")}
-                               className="hover:text-[#E4405F] hover:bg-[#E4405F]/10"
-                             />
-                             <ShareButton 
-                               icon={
-                                 <svg className="h-5 w-5 fill-current" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                                   <path d="M19.59 6.69a4.83 4.83 0 0 1-3.77-4.25V2h-3.45v13.67a2.89 2.89 0 0 1-5.2 1.74 2.89 2.89 0 0 1 2.31-4.64 2.93 2.93 0 0 1 .88.13V9.4a6.84 6.84 0 0 0-1-.05A6.33 6.33 0 0 0 5 20.1a6.34 6.34 0 0 0 10.86-4.43v-7a8.16 8.16 0 0 0 4.77 1.52v-3.4a4.85 4.85 0 0 1-1-.1z"/>
-                                 </svg>
-                               } 
-                               label="TikTok" 
-                               onClick={() => handleShare("TikTok")}
-                               className="hover:text-[#000000] hover:bg-[#000000]/10 dark:hover:text-white dark:hover:bg-white/10"
-                             />
-                           </div>
-                           <Separator />
-                           <div className="flex items-center space-x-2">
-                             <div className="grid flex-1 gap-2">
-                               <Label htmlFor="link" className="sr-only">
-                                 Link
-                               </Label>
-                               <Input
-                                 id="link"
-                                 defaultValue="https://ayashare.com/v/8x9s2"
-                                 readOnly
-                               />
-                             </div>
-                             <Button type="submit" size="sm" className="px-3" onClick={() => handleShare("Clipboard")}>
-                               <span className="sr-only">Copy</span>
-                               <LinkIcon className="h-4 w-4" />
-                             </Button>
-                           </div>
-                         </div>
-                       </DialogContent>
-                     </Dialog>
-                     
-                     <Button variant="outline" size="icon"><Download className="h-4 w-4"/></Button>
+                     <Button variant="outline" size="icon" asChild>
+                       <a href={selectedVideo.url} download target="_blank">
+                         <Download className="h-4 w-4"/>
+                       </a>
+                     </Button>
+                     <Button 
+                       variant="outline" 
+                       size="icon"
+                       onClick={() => handleDeleteVideo(selectedVideo.id)}
+                       disabled={deleteVideoMutation.isPending}
+                     >
+                       <Trash2 className="h-4 w-4 text-destructive"/>
+                     </Button>
                    </div>
                 </div>
 
                 <Card className="overflow-hidden border-none shadow-2xl bg-card/50 backdrop-blur-md">
-                  <div className="relative aspect-video bg-black/5 flex flex-col items-center justify-center p-12 text-center space-y-8 group">
-                     <div 
-                        className="absolute inset-0 z-0 opacity-30 pointer-events-none"
-                        style={{
-                          backgroundImage: `url(${bgImage})`,
-                          backgroundSize: 'cover',
-                          backgroundPosition: 'center'
-                        }}
-                      />
-                    
-                    <div className="relative z-10 space-y-8">
-                      <p className="text-4xl md:text-5xl leading-relaxed font-arabic text-primary" dir="rtl">
-                        {MOCK_AYA.arabic}
-                      </p>
-                      <p className="text-lg md:text-xl font-serif text-foreground/80 max-w-2xl mx-auto">
-                        {MOCK_AYA.english}
-                      </p>
-                      <div className="inline-block px-4 py-1 rounded-full border border-accent/50 bg-accent/10 text-accent-foreground text-sm font-medium">
-                        Surah {MOCK_AYA.surah} • Aya {MOCK_AYA.aya}
-                      </div>
-                    </div>
-
-                    {/* Video Controls Overlay */}
-                    <div className="absolute bottom-0 left-0 right-0 p-6 bg-gradient-to-t from-black/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity">
-                      <div className="flex items-center gap-4">
-                        <Button size="icon" className="h-10 w-10 rounded-full bg-primary text-primary-foreground hover:bg-primary/90">
-                          <Play className="h-5 w-5 ml-1" />
-                        </Button>
-                        <div className="flex-1 h-1 bg-muted-foreground/20 rounded-full overflow-hidden">
-                          <div className="h-full w-1/3 bg-primary rounded-full" />
-                        </div>
-                        <span className="text-xs font-medium tabular-nums">00:12</span>
-                      </div>
-                    </div>
+                  <div className="relative aspect-video bg-black">
+                    <video 
+                      src={selectedVideo.url} 
+                      controls 
+                      className="w-full h-full"
+                    />
                   </div>
                 </Card>
+                
+                <div className="text-center">
+                  <p className="text-sm text-muted-foreground">
+                    Created on {new Date(selectedVideo.createdAt).toLocaleDateString()}
+                  </p>
+                </div>
+              </motion.div>
+            )}
+
+            {/* STATE: HISTORY */}
+            {viewState === "history" && (
+              <motion.div
+                key="history"
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -20 }}
+                className="w-full max-w-4xl"
+              >
+                <div className="flex items-center justify-between mb-6">
+                  <h2 className="text-2xl font-serif font-bold">My Videos</h2>
+                  <Button onClick={reset}>
+                    <Mic className="mr-2 h-4 w-4" /> New Recording
+                  </Button>
+                </div>
+
+                {isLoadingVideos ? (
+                  <div className="flex items-center justify-center py-12">
+                    <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                  </div>
+                ) : videos.length === 0 ? (
+                  <Card className="p-12 text-center">
+                    <VideoIcon className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
+                    <h3 className="text-lg font-medium mb-2">No videos yet</h3>
+                    <p className="text-muted-foreground mb-4">Create your first video by recording or uploading audio</p>
+                    <Button onClick={reset}>Create Video</Button>
+                  </Card>
+                ) : (
+                  <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                    {videos.map((video) => (
+                      <Card key={video.id} className="overflow-hidden group cursor-pointer hover:shadow-lg transition-shadow">
+                        <div 
+                          className="aspect-video bg-black relative"
+                          onClick={() => {
+                            setSelectedVideo(video);
+                            setViewState("result");
+                          }}
+                        >
+                          <video 
+                            src={video.url} 
+                            className="w-full h-full object-cover"
+                          />
+                          <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                            <Play className="h-12 w-12 text-white" />
+                          </div>
+                        </div>
+                        <CardContent className="p-4">
+                          <div className="flex items-center justify-between">
+                            <div>
+                              <p className="font-medium truncate">{video.title}</p>
+                              <p className="text-xs text-muted-foreground">
+                                {new Date(video.createdAt).toLocaleDateString()}
+                              </p>
+                            </div>
+                            <Button 
+                              variant="ghost" 
+                              size="icon"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleDeleteVideo(video.id);
+                              }}
+                              disabled={deleteVideoMutation.isPending}
+                            >
+                              <Trash2 className="h-4 w-4 text-destructive" />
+                            </Button>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    ))}
+                  </div>
+                )}
               </motion.div>
             )}
 
@@ -390,11 +499,12 @@ export default function Dashboard() {
 
 // Helper Components
 
-function NavButton({ icon, label, isOpen, active }: { icon: React.ReactNode, label: string, isOpen: boolean, active: boolean }) {
+function NavButton({ icon, label, isOpen, active, onClick }: { icon: React.ReactNode, label: string, isOpen: boolean, active: boolean, onClick: () => void }) {
   return (
     <Button
       variant={active ? "secondary" : "ghost"}
       className={`w-full justify-start h-12 ${!isOpen && "justify-center px-0"} ${active ? "bg-sidebar-accent text-sidebar-accent-foreground" : "text-sidebar-foreground/70"}`}
+      onClick={onClick}
     >
       <span className="mr-0">{icon}</span>
       {isOpen && <span className="ml-3 font-medium">{label}</span>}
@@ -402,7 +512,7 @@ function NavButton({ icon, label, isOpen, active }: { icon: React.ReactNode, lab
   );
 }
 
-function ActionCard({ icon, title, description, onClick, active = false, testId }: any) {
+function ActionCard({ icon, title, description, onClick, active = false, testId }: { icon: React.ReactNode, title: string, description: string, onClick: () => void, active?: boolean, testId: string }) {
   return (
     <Card 
       className={`group cursor-pointer transition-all duration-300 hover:shadow-lg hover:-translate-y-1 border-2 ${active ? 'border-primary bg-primary/5' : 'border-transparent hover:border-primary/20'}`}
@@ -419,21 +529,6 @@ function ActionCard({ icon, title, description, onClick, active = false, testId 
         </div>
       </CardContent>
     </Card>
-  );
-}
-
-function ShareButton({ icon, label, onClick, className }: any) {
-  return (
-    <Button
-      variant="ghost"
-      className={`flex flex-col items-center justify-center h-20 gap-2 transition-colors ${className}`}
-      onClick={onClick}
-    >
-      <div className="h-8 w-8 flex items-center justify-center rounded-full bg-muted">
-        {icon}
-      </div>
-      <span className="text-xs font-medium">{label}</span>
-    </Button>
   );
 }
 

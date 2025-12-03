@@ -1,87 +1,130 @@
-import { createContext, useContext, useState, useEffect, ReactNode } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { User } from "@/types/api";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+  type ReactNode,
+} from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import type { User } from "@/types/api";
 
 interface AuthContextType {
   user: User | null;
-  isLoading: boolean;
+  token: string | null;
   isAuthenticated: boolean;
+  isLoading: boolean;
   login: () => void;
-  logout: () => Promise<void>;
-  refetchUser: () => void;
+  logout: () => void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-// API base URL
+const TOKEN_STORAGE_KEY = "aya-share-token";
 const API_URL = "/api/v1";
+
+const readStoredToken = () => {
+  if (typeof window === "undefined") return null;
+  return localStorage.getItem(TOKEN_STORAGE_KEY);
+};
+
+export const getStoredToken = readStoredToken;
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient();
+  const [user, setUser] = useState<User | null>(null);
+  const [token, setToken] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
 
-  // Fetch current user
-  const { data, isLoading, refetch } = useQuery({
-    queryKey: ["user"],
-    queryFn: async () => {
+  // Fetch user from /auth/me
+  const fetchUser = useCallback(async (authToken: string) => {
+    try {
       const res = await fetch(`${API_URL}/auth/me`, {
-        credentials: "include",
+        headers: { Authorization: `Bearer ${authToken}` },
       });
-      
-      if (res.status === 401) {
-        return null;
+      if (res.ok) {
+        const json = await res.json();
+        setUser(json.data?.user ?? null);
+      } else {
+        // Token invalid, clear it
+        localStorage.removeItem(TOKEN_STORAGE_KEY);
+        setToken(null);
+        setUser(null);
       }
-      
-      if (!res.ok) {
-        throw new Error("Failed to fetch user");
+    } catch {
+      setUser(null);
+    }
+  }, []);
+
+  // On mount, read token and fetch user
+  useEffect(() => {
+    const storedToken = readStoredToken();
+    setToken(storedToken);
+    
+    if (storedToken) {
+      fetchUser(storedToken).finally(() => setIsLoading(false));
+    } else {
+      setIsLoading(false);
+    }
+  }, [fetchUser]);
+
+  // Listen for storage changes (other tabs)
+  useEffect(() => {
+    const handleStorageChange = (e: StorageEvent) => {
+      if (e.key === TOKEN_STORAGE_KEY) {
+        const newToken = e.newValue;
+        setToken(newToken);
+        if (newToken) {
+          fetchUser(newToken);
+        } else {
+          setUser(null);
+          queryClient.removeQueries({ queryKey: ["videos"] });
+        }
       }
-      
-      const json = await res.json();
-      return json.data?.user as User | null;
-    },
-    retry: false,
-    staleTime: 1000 * 60 * 5, // 5 minutes
-  });
+    };
+
+    window.addEventListener("storage", handleStorageChange);
+    return () => window.removeEventListener("storage", handleStorageChange);
+  }, [fetchUser, queryClient]);
 
   // Redirect to Google OAuth
-  const login = () => {
+  const login = useCallback(() => {
     window.location.href = `${API_URL}/auth/google`;
-  };
+  }, []);
 
   // Logout
-  const logout = async () => {
-    try {
-      await fetch(`${API_URL}/auth/logout`, {
+  const logout = useCallback(() => {
+    if (token) {
+      fetch(`${API_URL}/auth/logout`, {
         method: "POST",
-        credentials: "include",
-      });
-    } catch (error) {
-      console.error("Logout error:", error);
+        headers: { Authorization: `Bearer ${token}` },
+      }).catch(() => undefined);
     }
-    
-    // Clear user data
-    queryClient.setQueryData(["user"], null);
-    queryClient.invalidateQueries({ queryKey: ["videos"] });
-  };
+    localStorage.removeItem(TOKEN_STORAGE_KEY);
+    setUser(null);
+    setToken(null);
+    queryClient.removeQueries({ queryKey: ["videos"] });
+  }, [queryClient, token]);
 
-  const value: AuthContextType = {
-    user: data ?? null,
-    isLoading,
-    isAuthenticated: !!data,
-    login,
-    logout,
-    refetchUser: refetch,
-  };
-
-  return (
-    <AuthContext.Provider value={value}>
-      {children}
-    </AuthContext.Provider>
+  const value = useMemo<AuthContextType>(
+    () => ({
+      user,
+      token,
+      isAuthenticated: Boolean(user && token),
+      isLoading,
+      login,
+      logout,
+    }),
+    [isLoading, login, logout, token, user]
   );
+
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 
 export function useAuth() {
   const context = useContext(AuthContext);
-  if (context === undefined) {
+  if (!context) {
     throw new Error("useAuth must be used within an AuthProvider");
   }
   return context;

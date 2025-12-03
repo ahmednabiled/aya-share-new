@@ -1,16 +1,32 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Video, VideosResponse, VideoResponse } from "@/types/api";
+import { getStoredToken } from "@/contexts/AuthContext";
+import type { Video, VideosResponse, VideoResponse } from "@/types/api";
 
 const API_URL = "/api/v1";
 
+const authFetch = async (url: string, options: RequestInit = {}) => {
+  const token = getStoredToken();
+  if (!token) {
+    throw new Error("You must be signed in to perform this action.");
+  }
+
+  const headers = new Headers(options.headers || {});
+  headers.set("Authorization", `Bearer ${token}`);
+
+  return fetch(url, {
+    ...options,
+    headers,
+  });
+};
+
 // Get all videos for current user
 export function useVideos() {
+  const token = getStoredToken();
+  
   return useQuery({
     queryKey: ["videos"],
     queryFn: async (): Promise<Video[]> => {
-      const res = await fetch(`${API_URL}/video/allVideos`, {
-        credentials: "include",
-      });
+      const res = await authFetch(`${API_URL}/video/allVidoes`);
 
       if (!res.ok) {
         throw new Error("Failed to fetch videos");
@@ -19,6 +35,7 @@ export function useVideos() {
       const json: VideosResponse = await res.json();
       return json.data?.videos ?? [];
     },
+    enabled: !!token, // Only fetch if token exists
   });
 }
 
@@ -27,9 +44,7 @@ export function useVideo(id: string) {
   return useQuery({
     queryKey: ["video", id],
     queryFn: async (): Promise<Video | null> => {
-      const res = await fetch(`${API_URL}/video/video/${id}`, {
-        credentials: "include",
-      });
+      const res = await authFetch(`${API_URL}/video/video/${id}`);
 
       if (!res.ok) {
         return null;
@@ -51,14 +66,13 @@ export function useCreateVideo() {
       const formData = new FormData();
       formData.append("audio", audioFile);
 
-      const res = await fetch(`${API_URL}/video/createVideo`, {
+      const res = await authFetch(`${API_URL}/video/createVideo`, {
         method: "POST",
         body: formData,
-        credentials: "include",
       });
 
       if (!res.ok) {
-        const error = await res.json();
+        const error = await res.json().catch(() => ({}));
         throw new Error(error.error || "Failed to create video");
       }
 
@@ -69,7 +83,6 @@ export function useCreateVideo() {
       return json.data.video;
     },
     onSuccess: () => {
-      // Refetch videos list after creating a new one
       queryClient.invalidateQueries({ queryKey: ["videos"] });
     },
   });
@@ -81,18 +94,16 @@ export function useDeleteVideo() {
 
   return useMutation({
     mutationFn: async (videoId: string): Promise<void> => {
-      const res = await fetch(`${API_URL}/video/deleteVideo/${videoId}`, {
+      const res = await authFetch(`${API_URL}/video/deleteVideo/${videoId}`, {
         method: "DELETE",
-        credentials: "include",
       });
 
       if (!res.ok) {
-        const error = await res.json();
+        const error = await res.json().catch(() => ({}));
         throw new Error(error.error || "Failed to delete video");
       }
     },
     onSuccess: () => {
-      // Refetch videos list after deletion
       queryClient.invalidateQueries({ queryKey: ["videos"] });
     },
   });

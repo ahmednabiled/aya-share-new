@@ -6,6 +6,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { AuthProvider, useAuth } from "@/contexts/AuthContext";
 import NotFound from "@/pages/not-found";
 import AuthPage from "@/pages/auth-page";
+import AuthCallback from "@/pages/auth-callback";
 import Dashboard from "@/pages/dashboard";
 import { Loader2 } from "lucide-react";
 
@@ -56,6 +57,7 @@ function Router() {
     <Switch>
       <Route path="/" component={() => <PublicRoute component={AuthPage} />} />
       <Route path="/login" component={() => <PublicRoute component={AuthPage} />} />
+      <Route path="/auth/callback" component={AuthCallback} />
       <Route path="/dashboard" component={() => <ProtectedRoute component={Dashboard} />} />
       <Route component={NotFound} />
     </Switch>
