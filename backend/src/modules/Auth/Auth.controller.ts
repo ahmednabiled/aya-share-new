@@ -4,12 +4,15 @@ import jwt from "jsonwebtoken";
 
 export const handleCallBack = (req: Request, res: Response) => {
     const id = req.user?.id;
-    const token = jwt.sign({ id }, config.JWT_SECRET_KEY as string, {
+
+    const secret = config.JWT_SECRET_KEY as string;
+    const token = jwt.sign({ id }, secret, {
         expiresIn: "15m"
     });
 
     // not used yet..
-    const refreshToken = jwt.sign({ id }, config.JWT_REFRESH_KEY as string, {
+    const refresh = config.JWT_REFRESH_KEY as string;
+    const refreshToken = jwt.sign({ id }, refresh, {
         expiresIn: "3d"
     });
 
