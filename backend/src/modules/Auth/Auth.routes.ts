@@ -1,6 +1,6 @@
 import express, { type Request, type Response} from "express";
 import passport from "../../config/passport.js";
-import { handleCallBack } from "./Auth.controller.js";
+import { handleCallBack, getMe } from "./Auth.controller.js";
 import { isAuth } from "./Auth.service.js";
 
 const router = express.Router();
@@ -10,7 +10,7 @@ router.get('/google', passport.authenticate("google", {
 }));
 
 router.get("/google/callback", passport.authenticate("google", {
-    failureRedirect: "/login", //to do
+    failureRedirect: "http://localhost:5000/login",
     session: false
 }), handleCallBack);
 
@@ -21,5 +21,6 @@ router.post("/logout", isAuth, (req: Request, res: Response) => {
     })
 })
 
+router.get("/me", isAuth, getMe);
 
 export default router;

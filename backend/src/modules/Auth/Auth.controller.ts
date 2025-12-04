@@ -21,11 +21,15 @@ export const handleCallBack = (req: Request, res: Response) => {
         httpOnly: true
     })
 
+    const frontendUrl = `http://localhost:5000/auth/callback?token=${token}`;
+    res.redirect(frontendUrl);
+}
+
+export const getMe = (req: Request, res: Response) => {
     res.status(200).json({
         status: "Success",
         data: {
-            user: req.user,
-        },
-        token,
+            user: req.User
+        }
     });
 }
