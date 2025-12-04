@@ -1,5 +1,5 @@
 import type { NextFunction, Request, Response } from "express";
-import { processAudio, UPLOAD_PATH } from "../../utils/runpy.js";
+import { processAudio } from "../../utils/runpy.js";
 import { deleteFile } from "../../utils/deletefiles.js";
 import { deleteFolder } from "../../utils/deletefolder.js";
 import { readFile } from "fs/promises";
@@ -7,13 +7,17 @@ import supabase from "../../config/supabase.js";
 import prisma from "../../config/prisma.js";
 import path from "path";
 import APIError from "../../utils/APIError.js";
-import { nextTick } from "process";
+
+const PROJECT_ROOT = path.resolve(process.cwd(), "..");
+const UPLOAD_PATH = path.join(PROJECT_ROOT, "backend", "shared");
 
 export const createVideo = async (req: Request, res: Response, next: NextFunction) => {
     const audioPath = req.file?.path;
     const audioName = req.file?.filename;
-    const n = audioName?.length!
-    const videoName = audioName?.substring(0, n-1) + "4";
+    
+    const baseName = audioName?.substring(0, audioName.lastIndexOf('.')) || audioName;
+    const videoName = `${baseName}.mp4`;
+    
     await processAudio(audioPath!, videoName!);
 
     const videoPath = path.join(UPLOAD_PATH, videoName);
@@ -33,6 +37,7 @@ export const createVideo = async (req: Request, res: Response, next: NextFunctio
         })
 
     if(uploadError){
+        await deleteFolder(UPLOAD_PATH);
         return next(new APIError("Internal server error", 500));
     }
 
