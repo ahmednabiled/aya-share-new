@@ -34,6 +34,7 @@ logger = logging.getLogger(__name__)
 # Cross-platform paths for generated assets and static resources
 SCRIPT_ROOT = Path(__file__).resolve().parent
 UPLOAD_DIR = SCRIPT_ROOT.parent / "backend" / "shared"
+CONVERSION_DIR = SCRIPT_ROOT.parent / "backend" / "src" / "uploads"
 ASSETS_DIR = SCRIPT_ROOT / "assets"
 
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
@@ -187,7 +188,7 @@ def split_audio(
     
     try:
         # Load audio file
-        audio = AudioSegment.from_file(audio_path, format=audio_format)
+        audio = AudioSegment.from_file(audio_path)
         logger.info(f"Audio loaded: duration={len(audio)/1000:.2f}s, dBFS={audio.dBFS:.2f}")
     except Exception as e:
         logger.error(f"Failed to load audio file: {e}")
@@ -407,6 +408,41 @@ def generate_video(
     
     return final_video
 
+def convert_to_mp3(audio_path: str, output_dir: str) -> str:
+    """
+    Convert any audio format to MP3.
+    
+    Args:
+        audio_path: Path to input audio file (any format)
+        output_dir: Directory to save the converted MP3
+    
+    Returns:
+        Path to the converted MP3 file
+    """
+    audio_path = Path(audio_path)
+    
+    # If already MP3, return as is
+    if audio_path.suffix.lower() == ".mp3":
+        logger.info(f"Audio is already MP3: {audio_path}")
+        return str(audio_path)
+    
+    # Generate output MP3 path
+    mp3_filename = audio_path.stem + ".mp3"
+    mp3_path = Path(output_dir) / mp3_filename
+    
+    logger.info(f"Converting {audio_path.suffix} to MP3...")
+    logger.info(f"Input: {audio_path}")
+    logger.info(f"Output: {mp3_path}")
+    
+    # Load audio (pydub auto-detects format)
+    audio = AudioSegment.from_file(str(audio_path))
+    
+    # Export as MP3
+    audio.export(str(mp3_path), format="mp3", bitrate="192k")
+    
+    logger.info(f"✓ Converted to MP3: {mp3_path}")
+    
+    return str(mp3_path)
 
 def process_full_pipeline(
     audio_path: str,
@@ -446,6 +482,7 @@ def process_full_pipeline(
         results["chunks_count"] = len(chunks)
         results["chunks_dir"] = output_dir
         
+        audio_path = convert_to_mp3(audio_path=audio_path, output_dir=CONVERSION_DIR)
         # Step 2: Transcribe (only if API URL provided)
         if api_url:
             logger.info("\n[STEP 2/3] Transcribing audio chunks...")
@@ -517,7 +554,7 @@ if __name__ == "__main__":
             audio_path=audio_path,
             output_video=str(DEFAULT_OUTPUT_VIDEO),
             output_dir=str(UPLOAD_DIR),
-            api_url="https://f3322ed61943.ngrok-free.app/transcribe",
+            api_url="https://napiform-margrett-uncomplementally.ngrok-free.dev/transcribe",
             bg_path=str(DEFAULT_BG_IMAGE),
             font_path=str(DEFAULT_FONT_FILE)
         )
